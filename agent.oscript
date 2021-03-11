@@ -1,0 +1,321 @@
+{
+	bounce_fees: { base: 10000 },
+	init: `{
+		$curve_address = trigger.data.curve_address;
+		$owner = trigger.address;
+		
+		if (!exists($curve_address) OR !is_valid_address($curve_address))
+			bounce('bad curve_address address');
+		
+		$asset1 = var[$curve_address]['asset1'];
+		$asset2 = var[$curve_address]['asset2'];
+
+		if (!$asset1 AND !$asset2)
+			bounce('curve not found');
+
+		if(!exists(var[$curve_address]['p2']))
+			bounce('p2 not initialized');
+	
+		$initial_p2 = var[$curve_address]['p2'];
+		
+		$curve_params = definition[$curve_address][1].params;
+
+		$id = 'exchange_' || $owner || "_" || $curve_address; 
+
+		$amount1 = trigger.output[[asset=$asset1]];
+		$amount2 = trigger.output[[asset=$asset2]];
+
+		$dilution_factor = var[$curve_address]['dilution_factor'];
+		$growth_factor = var[$curve_address]['growth_factor'];
+		$rate_update_ts = var[$curve_address]['rate_update_ts'];
+
+		$leverage = $curve_params.leverage OTHERWISE 0;
+
+		$m = $curve_params.m;
+		$n = $curve_params.n;
+
+		$interest_rate = var[$curve_address]['interest_rate'] OTHERWISE $curve_params.interest_rate OTHERWISE 0.1;
+
+	}`,
+	getters: `{
+		$get_growth_factor = ($rate_update_ts, $interest_rate, $curve_address) => {
+			$term = (timestamp - $rate_update_ts) / (360 * 24 * 3600); // in years
+			$growth_factor = var[$curve_address]['growth_factor'] * (1 + $interest_rate)^$term;
+			$growth_factor
+		};
+
+		$get_oracles = ($curve_address, $curve_params) => {
+			$oracles = var[$curve_address]['oracles'];
+			if ($oracles)
+				return $oracles;
+			$initial_oracles = [];
+			if ($curve_params.oracle1 AND $curve_params.feed_name1)
+				$initial_oracles[] = {oracle: $curve_params.oracle1, feed_name: $curve_params.feed_name1, op: $curve_params.op1 OTHERWISE '*'};
+			if ($curve_params.oracle2 AND $curve_params.feed_name2)
+				$initial_oracles[] = {oracle: $curve_params.oracle2, feed_name: $curve_params.feed_name2, op: $curve_params.op2 OTHERWISE '*'};
+			if ($curve_params.oracle3 AND $curve_params.feed_name3)
+				$initial_oracles[] = {oracle: $curve_params.oracle3, feed_name: $curve_params.feed_name3, op: $curve_params.op3 OTHERWISE '*'};
+			$initial_oracles
+		};
+
+		$get_oracle_price = ($curve_address, $curve_params) => {
+			$oracles = $get_oracles($curve_address, $curve_params);
+			$oracle_price = reduce($oracles, 3, ($price, $oracle_info) => {
+				if (!exists($price))
+					return false;
+				$df = data_feed[[oracles=$oracle_info.oracle, feed_name=$oracle_info.feed_name, ifnone=false]];
+				if (!exists($df))
+					return false;
+				($oracle_info.op == '*') ? $price * $df : $price / $df
+			}, 1);
+			$oracle_price
+		};
+		
+		$get_target_p2 = ($curve_address, $curve_params, $leverage, $new_growth_factor) => {
+			$oracle_price = $get_oracle_price($curve_address, $curve_params);
+			if (!exists($oracle_price))
+				return false;
+			$target_p2 = $oracle_price^($leverage - 1) * $new_growth_factor;
+			$target_p2
+		};
+
+		$get_reserve = ($s1, $s2, $m, $n, $dilution_factor) => {
+			$r = $dilution_factor * $s1^$m * $s2^$n;
+			$r
+		};
+
+		$get_fee = ($avg_reserve, $old_distance, $new_distance, $fee_multiplier) => {
+			$fee = ceil($fee_multiplier * $avg_reserve * ($new_distance - $old_distance) * ($new_distance + $old_distance));
+			$fee
+		};
+
+		$get_turnover = ($reserve_payout, $tokens1, $tokens2, $p2) => {
+			// positive numbers are outputs, negative amounts are inputs
+			$reserve_turnover = abs($reserve_payout);
+			if ($tokens1 >= 0 AND $tokens2 >= 0 OR $tokens1 <= 0 AND $tokens2 <= 0)
+				return $reserve_turnover;
+			$token2_turnover = abs($tokens2) * $p2 * 10^(params.reserve_asset_decimals - params.decimals2);
+			if ($tokens2 >= 0 AND $reserve_payout >= 0 OR $tokens2 <= 0 AND $reserve_payout <= 0)
+				return $token2_turnover + $reserve_turnover;
+			$token2_turnover
+		};
+	}`,
+	messages: {
+		cases: [
+			{
+				if: `{!exists(trigger.data.withdraw) AND !exists(trigger.data.execute) }`, // add tokens & create exchange
+				messages: [
+					{
+						app: 'state',
+						init: `{
+							$max_fee_percent = trigger.data.max_fee_percent OTHERWISE 1;
+
+							if($amount1 == 0 AND $amount2 == 0)
+								bounce("you don't send tokens");
+
+							$current_exchange = var[$id];
+						}`,
+						state: `{
+							if($current_exchange){
+								$current_exchange.amount1 = $current_exchange.amount1 + $amount1;
+								$current_exchange.amount2 = $current_exchange.amount2 + $amount2;
+								var[$id] = $current_exchange;
+								response['STATUS'] = "UPDATE";
+							} else {
+								$exchange = {
+									id: $id,
+									curve_address: $curve_address,
+									amount1: $amount1,
+									amount2: $amount2,
+									max_fee_percent: $max_fee_percent,
+									owner: $owner,
+								};
+
+								var[$id] = $exchange;
+								response['id'] = $id;
+								response['STATUS'] = "CREATE NEW";
+							}
+						}`
+					}
+				]
+			},
+			{
+				if: `{ trigger.data.withdraw }`,
+				init: `{
+					$tokens1 = trigger.data.tokens1 OTHERWISE 0;
+					$tokens2 = trigger.data.tokens2 OTHERWISE 0;
+					$exchange = var[$id];
+
+					if(!$exchange)
+						bounce('exchange not found');
+
+					$withdraw_all = $tokens1 == 0 AND $tokens2 == 0;
+
+					if($tokens1 > 0 AND $exchange.amount1 < $tokens1)
+						bounce('You are trying to withdraw too many tokens1');
+
+					if($tokens2 > 0 AND $exchange.amount2 < $tokens2)
+						bounce('You are trying to withdraw too many tokens2');
+
+				}`,
+				messages: [
+					{
+						if: "{ $withdraw_all OR $tokens1 > 0 }",
+						app: 'payment',
+						payload: {
+							asset: `{$asset1}`,
+							outputs: [
+								{address: "{$owner}", amount: "{ $tokens1 > 0 ? $tokens1 : $exchange.amount1 }"}
+							]
+						}
+					},
+					{
+						if: "{ $withdraw_all OR $tokens2 > 0}",
+						app: 'payment',
+						payload: {
+							asset: `{$asset2}`,
+							outputs: [
+								{address: "{$owner}", amount: "{ $tokens2 > 0 ? $tokens2 : $exchange.amount2 }"}
+							]
+						}
+					},
+					{
+						if: "{ $withdraw_all OR $tokens1 > 0 OR $tokens2 > 0 }",
+						app: 'state',
+						state: `{
+							if($withdraw_all){
+								var[$id] = false;
+							} else {
+								$exchange.amount1 = $exchange.amount1 - $tokens1;
+								$exchange.amount2 = $exchange.amount2 - $tokens2;
+								var[$id] = $exchange;
+							}
+							response['action'] = "withdraw";
+						}`
+					}
+				]
+			},
+			{
+				if: "{ trigger.data.execute }",
+				init: `{
+					$exchange = var[$id];
+					$auto_withdraw = trigger.data.auto_withdraw;
+
+					$p2 = var[$curve_address]['p2'];
+
+					if(!$exchange)
+						bounce('exchange not found');
+
+					if($exchange.amount1 == 0)
+						bounce('tokens1 not found');
+
+					if($exchange.amount2 == 0)
+						bounce('tokens2 not found');
+
+					$new_supply1 = var[$curve_address]['supply1'] - $exchange.amount1;
+					$new_supply2 = var[$curve_address]['supply2'] - $exchange.amount2;
+
+					$s1 = $new_supply1 / 10^$curve_params.decimals1;
+					$s2 = $new_supply2 / 10^$curve_params.decimals2;
+
+					$expectT1 = (($p2 / ($dilution_factor * $n * (is_integer($n*2) ? sqrt($s2^(($n-1)*2)) : $s2^($n-1))))^(1 / $m)) - (var[$curve_address]['supply1'] / 10^$curve_params.decimals1);
+					$expectT2 = (($p2 / ($dilution_factor * ($s1^$m) * $n)) ^ (1 / ($n - 1))) - var[$curve_address]['supply2'] / 10 ^ $curve_params.decimals2;
+
+					$expectT1WithoutDecimals = abs(round($expectT1 * 10^$curve_params.decimals1));
+					$expectT2WithoutDecimals = abs(round($expectT2 * 10^$curve_params.decimals2));
+
+					if(abs($expectT2WithoutDecimals) < $exchange.amount2) {
+						$count1 = $exchange.amount1;
+						$count2 = $expectT2WithoutDecimals;
+						$change1 = 0;
+						$change2 = $exchange.amount2 - $count2;
+					} else if(abs($expectT1WithoutDecimals) < $exchange.amount1){
+						$count1 = $expectT1WithoutDecimals;
+						$count2 = $exchange.amount2;
+						$change1 = $exchange.amount1 - $count1;
+						$change2 = 0;
+					} else {
+						bounce("Couldn't calculate optimal quantity");
+					}
+
+					response['count1'] = $count1;
+					response['count2'] = $count2;
+
+					response['change1'] = $change1;
+					response['change2'] = $change2;
+
+				}`,
+				messages: [
+					{
+						app: 'payment',
+						payload: {
+							asset: `{$asset1}`,
+							outputs: [
+								{address: "{$curve_address}", amount: "{ $count1 }"},
+								{address: "{$owner}", amount: "{ $change1 }", if: "{ $auto_withdraw }"}
+							]
+						}
+					},
+					{
+						app: 'payment',
+						payload: {
+							asset: `{$asset2}`,
+							outputs: [
+								{address: "{$curve_address}", amount: "{ $count2 }"},
+								{address: "{$owner}", amount: "{ $change2 }", if: "{ $auto_withdraw }"}
+							]
+						}
+					},
+					{
+						app: 'data',
+						payload: {
+							to: `{$owner}`
+						}
+					},
+					{
+						app: 'state',
+						state: '{
+							if($auto_withdraw){
+								var[$id] = false;
+							} else {
+								$exchange.amount1 = $exchange.amount1 - $count1;
+								$exchange.amount2 = $exchange.amount2 - $count2;
+								var[$id] = $exchange;
+							}
+
+							$reserve = var[$curve_address]['reserve'];
+
+							$fee_multiplier = var[$curve_address]['fee_multiplier'] OTHERWISE $curve_params.fee_multiplier OTHERWISE 5;
+
+							$r = $get_reserve($s1, $s2, $m, $n, $dilution_factor);
+
+							$new_reserve = ceil($r * 10^$curve_params.reserve_asset_decimals);
+							$avg_reserve = ($reserve + $new_reserve) / 2;
+
+							$new_growth_factor = $get_growth_factor($rate_update_ts, $interest_rate, $curve_address);
+							$target_p2 = $get_target_p2($curve_address, $curve_params, $leverage, $new_growth_factor);
+
+							$distance =  abs($initial_p2 - $target_p2) / $target_p2;
+							$new_distance = abs($p2 - $target_p2) / $target_p2;
+							$fee = $get_fee($avg_reserve, $distance, $new_distance, $fee_multiplier);
+
+							$reserve_delta = $new_reserve - $reserve;
+							$turnover = $get_turnover(-$reserve_delta, $count1, $count2, $p2);
+							
+							response['turnover'] = $turnover;
+							response['fee'] = $fee;
+
+							$fee_percent = $fee / $turnover * 100;
+
+							response['fee_percent'] = $fee_percent;
+
+							if($fee_percent > $exchange.max_fee_percent){
+								bounce('The commission percentage is greater than the maximum ' || $fee_percent || " > " || $exchange.max_fee_percent);
+							}
+						}'
+					}
+				]
+			}
+		]
+	}
+}
