@@ -11,11 +11,12 @@
     "node": ">=8"
   },
   "dependencies": {
-    "chai": "^4.2.0",
-    "mocha": "^6.2.0",
     "aa-testkit": "git+https://github.com/valyakin/aa-testkit.git",
+    "aabot": "git+https://github.com/byteball/aabot.git",
     "bonded-stablecoin": "git+https://github.com/byteball/bonded-stablecoin.git",
-    "aabot": "git+https://github.com/byteball/aabot.git"
+    "chai": "^4.2.0",
+    "lodash": "^4.17.21",
+    "mocha": "^6.2.0"
   },
   "devDependencies": {
     "eslint": "^6.3.0",

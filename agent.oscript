@@ -1,42 +1,5 @@
 {
 	bounce_fees: { base: 10000 },
-	init: `{
-		$curve_address = trigger.data.curve_address;
-		$owner = trigger.address;
-		
-		if (!exists($curve_address) OR !is_valid_address($curve_address))
-			bounce('bad curve_address address');
-		
-		$asset1 = var[$curve_address]['asset1'];
-		$asset2 = var[$curve_address]['asset2'];
-
-		if (!$asset1 AND !$asset2)
-			bounce('curve not found');
-
-		if(!exists(var[$curve_address]['p2']))
-			bounce('p2 not initialized');
-	
-		$initial_p2 = var[$curve_address]['p2'];
-		
-		$curve_params = definition[$curve_address][1].params;
-
-		$id = 'exchange_' || $owner || "_" || $curve_address; 
-
-		$amount1 = trigger.output[[asset=$asset1]];
-		$amount2 = trigger.output[[asset=$asset2]];
-
-		$dilution_factor = var[$curve_address]['dilution_factor'];
-		$growth_factor = var[$curve_address]['growth_factor'];
-		$rate_update_ts = var[$curve_address]['rate_update_ts'];
-
-		$leverage = $curve_params.leverage OTHERWISE 0;
-
-		$m = $curve_params.m;
-		$n = $curve_params.n;
-
-		$interest_rate = var[$curve_address]['interest_rate'] OTHERWISE $curve_params.interest_rate OTHERWISE 0.1;
-
-	}`,
 	getters: `{
 		$get_growth_factor = ($rate_update_ts, $interest_rate, $curve_address) => {
 			$term = (timestamp - $rate_update_ts) / (360 * 24 * 3600); // in years
@@ -100,10 +63,35 @@
 			$token2_turnover
 		};
 	}`,
+	init: `{
+		$owner = params.owner;
+		if(!$owner)
+			bounce('no owner');
+	}`,
 	messages: {
 		cases: [
 			{
-				if: `{!exists(trigger.data.withdraw) AND !exists(trigger.data.execute) }`, // add tokens & create exchange
+				if: `{!exists(trigger.data.withdraw) AND !exists(trigger.data.execute)  AND !exists(trigger.data.define) }`, // add tokens & create exchange
+				init: `{
+				$curve_address = trigger.data.curve_address;
+
+				if($owner != trigger.address)
+					bounce('You not owner');
+
+				if (!exists($curve_address) OR !is_valid_address($curve_address))
+					bounce('bad curve_address address');
+				
+				$asset1 = var[$curve_address]['asset1'];
+				$asset2 = var[$curve_address]['asset2'];
+
+				if (!$asset1 AND !$asset2)
+					bounce('curve not found');
+
+				$id = 'exchange_' || $curve_address; 
+
+				$amount1 = trigger.output[[asset=$asset1]];
+				$amount2 = trigger.output[[asset=$asset2]];
+				}`,
 				messages: [
 					{
 						app: 'state',
@@ -144,11 +132,24 @@
 				init: `{
 					$tokens1 = trigger.data.tokens1 OTHERWISE 0;
 					$tokens2 = trigger.data.tokens2 OTHERWISE 0;
+
+					if($owner != trigger.address)
+						bounce('You not owner');
+
+					$curve_address = trigger.data.curve_address;
+
+					if (!exists($curve_address) OR !is_valid_address($curve_address))
+						bounce('bad curve_address address');
+		
+					$id = 'exchange_' || $curve_address; 
 					$exchange = var[$id];
 
 					if(!$exchange)
 						bounce('exchange not found');
-
+					
+					$asset1 = var[$curve_address]['asset1'];
+					$asset2 = var[$curve_address]['asset2'];
+					
 					$withdraw_all = $tokens1 == 0 AND $tokens2 == 0;
 
 					if($tokens1 > 0 AND $exchange.amount1 < $tokens1)
@@ -184,7 +185,9 @@
 						app: 'state',
 						state: `{
 							if($withdraw_all){
-								var[$id] = false;
+								$exchange.amount1 = 0;
+								$exchange.amount2 = 0;
+								var[$id] = $exchange;
 							} else {
 								$exchange.amount1 = $exchange.amount1 - $tokens1;
 								$exchange.amount2 = $exchange.amount2 - $tokens2;
@@ -198,6 +201,43 @@
 			{
 				if: "{ trigger.data.execute }",
 				init: `{
+					$curve_address = trigger.data.curve_address;
+
+					if($owner != trigger.address)
+						bounce('You not owner');
+						
+					if (!exists($curve_address) OR !is_valid_address($curve_address))
+						bounce('bad curve_address address');
+					
+					$asset1 = var[$curve_address]['asset1'];
+					$asset2 = var[$curve_address]['asset2'];
+
+					if (!$asset1 AND !$asset2)
+						bounce('curve not found');
+
+					if(!exists(var[$curve_address]['p2']))
+						bounce('p2 not initialized');
+				
+					$initial_p2 = var[$curve_address]['p2'];
+					
+					$curve_params = definition[$curve_address][1].params;
+
+					$id = 'exchange_' || $curve_address; 
+
+					$amount1 = trigger.output[[asset=$asset1]];
+					$amount2 = trigger.output[[asset=$asset2]];
+
+					$dilution_factor = var[$curve_address]['dilution_factor'];
+					$growth_factor = var[$curve_address]['growth_factor'];
+					$rate_update_ts = var[$curve_address]['rate_update_ts'];
+
+					$leverage = $curve_params.leverage OTHERWISE 0;
+
+					$m = $curve_params.m;
+					$n = $curve_params.n;
+
+					$interest_rate = var[$curve_address]['interest_rate'] OTHERWISE $curve_params.interest_rate OTHERWISE 0.1;
+
 					$exchange = var[$id];
 					$auto_withdraw = trigger.data.auto_withdraw;
 
@@ -276,7 +316,9 @@
 						app: 'state',
 						state: '{
 							if($auto_withdraw){
-								var[$id] = false;
+								$exchange.amount1 = 0;
+								$exchange.amount2 = 0;
+								var[$id] = $exchange;
 							} else {
 								$exchange.amount1 = $exchange.amount1 - $count1;
 								$exchange.amount2 = $exchange.amount2 - $count2;
@@ -314,6 +356,17 @@
 							}
 						}'
 					}
+				]
+			},
+			{
+				if: `{ trigger.data.define }`,
+					messages: [
+					{
+						app: 'state',
+						state: `{
+							var['created_at'] = timestamp;
+						}`
+					},
 				]
 			}
 		]

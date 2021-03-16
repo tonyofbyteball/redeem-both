@@ -3,6 +3,7 @@
 // `Testkit`, `Network`, `Nodes` and `Utils` from `aa-testkit` are available globally too
 const path = require('path')
 const { expect } = require('chai');
+const isInteger = require('lodash.isinteger');
 
 function round(n, precision) {
 	return Math.round(n * 10 ** precision) / 10 ** precision;
@@ -21,6 +22,7 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 			.with.agent({ daf2: path.join(__dirname, '../node_modules/bonded-stablecoin/define-asset2-forwarder.oscript') })
 			.with.agent({ governance: path.join(__dirname, '../node_modules/bonded-stablecoin/governance.oscript') })
 			.with.agent({ deposits: path.join(__dirname, '../node_modules/bonded-stablecoin/deposits.oscript') })
+			.with.agent({ factory: path.join(__dirname, '../factory.oscript') })
 			.with.agent({ transfer: path.join(__dirname, '../agent.oscript') })
 			.with.wallet({ oracle: 1e6 })
 			.with.wallet({ alice: 100000e9 })
@@ -37,6 +39,8 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 		this.bobAddress = await this.bob.getAddress()
 
 		this.transferAddress = this.network.agent.transfer
+		this.factoryAddress = this.network.agent.factory
+
 		// this.curveAddress = this.network.agent.transfer
 		this.n = 0.5;
 		this.m = 2;
@@ -137,25 +141,45 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 		this.getReserve = (s1, s2) => Math.ceil(1e9 * (s1 / 1e9) ** 2 * (s2 / 1e2) ** 0.5)
 		this.getP2 = (s1, s2) => (s1 / 1e9) ** 2 * 0.5 / (s2 / 1e2) ** 0.5
 		this.getFee = (avg_reserve, old_distance, new_distance) => Math.ceil(avg_reserve * (new_distance ** 2 - old_distance ** 2) * this.fee_multiplier);
-		this.buy = (tokens1, tokens2, bNoUpdate) => {
+		this.buy = (tokens1, tokens2, bNoUpdate, new_p2) => {
 			const new_supply1 = this.supply1 + tokens1
 			const new_supply2 = this.supply2 + tokens2
 			const new_reserve = this.getReserve(new_supply1, new_supply2)
 			const amount = new_reserve - this.reserve
 			const abs_reserve_delta = Math.abs(amount)
 			const avg_reserve = (this.reserve + new_reserve) / 2
-			const p2 = this.getP2(new_supply1, new_supply2)
+			const p2 = new_p2 || this.getP2(new_supply1, new_supply2)
 
 			const old_distance = this.reserve ? Math.abs(this.p2 - this.target_p2) / this.target_p2 : 0
 			const new_distance = Math.abs(p2 - this.target_p2) / this.target_p2
-			let fee = this.getFee(avg_reserve, old_distance, new_distance);
-			if (fee > 0) {
-				const reverse_reward = Math.floor((1 - old_distance / new_distance) * this.fast_capacity); // rough approximation
-			}
+			const regular_fee = this.getFee(avg_reserve, old_distance, new_distance);
+			const reserve_delta = new_reserve - this.reserve;
+			let fee, reserve_needed, reward;
 
+			if (old_distance === 0 && new_distance === 0) {
+				fee = 0;
+				reward = 0;
+				reserve_needed = reserve_delta;
+			} else if (new_distance >= old_distance) {
+				fee = regular_fee;
+				reward = 0;
+				reserve_needed = reserve_delta + fee;
+			} else {
+				fee = 0;
+				reward = Math.floor((1 - new_distance / old_distance) * this.fast_capacity);
+				reserve_needed = reserve_delta - reward; 
+			}
+			
+			// if (fee > 0) {
+			// 	const reverse_reward = Math.floor((1 - old_distance / new_distance) * this.fast_capacity); // rough approximation
+			// }
+			
 			const fee_percent = round(fee / abs_reserve_delta * 100, 14)
-			const reward = old_distance ? Math.floor((1 - new_distance / old_distance) * this.fast_capacity) : 0;
+			// const reward = old_distance ? Math.floor((1 - new_distance / old_distance) * this.fast_capacity) : 0;
 			const reward_percent = round(reward / abs_reserve_delta * 100, 4)
+
+			const reserve_asset_amount = 1e4 - 1e3;
+			const payout = reserve_asset_amount - reserve_needed;
 
 			// console.log('p2 =', p2, 'target p2 =', this.target_p2, 'amount =', amount, 'fee =', fee, 'reward =', reward, 'old distance =', old_distance, 'new distance =', new_distance, 'fast capacity =', this.fast_capacity)
 
@@ -179,7 +203,7 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 				this.reserve += amount
 			}
 
-			return { amount, fee, fee_percent, reward, reward_percent }
+			return { amount, fee, fee_percent, reward, reward_percent, payout, reserve_needed }
 		}
 
 		this.supply1 = 0
@@ -190,13 +214,33 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 		this.distance = 0
 	})
 
+	it('Alice create transfer', async () => {
+		const { unit, error } = await this.alice.triggerAaWithData({
+			toAddress: this.factoryAddress,
+			amount: 1e4,
+			data: {
+				create: 1
+			}
+		})
+
+		expect(error).to.be.null
+		expect(unit).to.be.validUnit
+
+		const { response } = await this.network.getAaResponseToUnit(unit)
+
+		expect(response.response.responseVars.transfer).to.be.not.undefined
+		expect(response.response.error).to.be.undefined
+		expect(response.bounced).to.be.false
+		expect(response.response_unit).to.be.validUnit
+
+		this.currentTransfer = response.response.responseVars.transfer;
+	})
 
 	it('Alice buys tokens', async () => {
 		this.target_p2 = 1 / this.price
 		const tokens1 = 1e9
 		const tokens2 = 100e2
-		const { amount, fee, fee_percent } = this.buy(tokens1, tokens2)
-
+		const { amount } = this.buy(tokens1, tokens2)
 		const { unit, error } = await this.alice.triggerAaWithData({
 			toAddress: this.curve_aa,
 			amount: amount + 1000,
@@ -217,7 +261,7 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 		expect(response.response_unit).to.be.validUnit
 
 		const { vars } = await this.alice.readAAStateVars(this.curve_aa)
-		// console.log(vars)
+
 		expect(vars['supply1']).to.be.equal(this.supply1)
 		expect(vars['supply2']).to.be.equal(this.supply2)
 		expect(vars['reserve']).to.be.equal(this.reserve)
@@ -245,14 +289,13 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 
 
 	it('Alice create exchange and add tokens 2', async () => {
-		this.aliceExchangeId = "exchange_" + this.aliceAddress + "_" + this.curve_aa;
-	
+		this.aliceExchangeId = "exchange_" + this.curve_aa;
 		this.amount2 = 4512;
 
 		const { unit, error } = await this.alice.sendMulti({
 			asset: this.asset2,
-			base_outputs: [{ address: this.transferAddress, amount: 1e4 }],
-			asset_outputs: [{ address: this.transferAddress, amount: this.amount2 }],
+			base_outputs: [{ address: this.currentTransfer, amount: 1e4 }],
+			asset_outputs: [{ address: this.currentTransfer, amount: this.amount2 }],
 			spend_unconfirmed: 'all',
 			messages: [{
 				app: 'data',
@@ -266,8 +309,8 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 		expect(unit).to.be.validUnit
 
 		const { response } = await this.network.getAaResponseToUnit(unit);
-		const id = "exchange_" + this.aliceAddress + "_" + this.curve_aa;
-		const { vars: transfer_vars } = await this.alice.readAAStateVars(this.transferAddress);
+		const id = "exchange_" + this.curve_aa;
+		const { vars: transfer_vars } = await this.alice.readAAStateVars(this.currentTransfer);
 
 		expect(response.response.responseVars.id).to.be.equal(id);
 		expect(transfer_vars[id]).to.be.not.undefined;
@@ -284,12 +327,12 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 
 
 	it("Alice add tokens 1 to transfer", async () => {
-		const amount1 = 59239545;
-		const id = "exchange_" + this.aliceAddress + "_" + this.curve_aa;
+		this.amount1 = 59239545;
+		const id = "exchange_" + this.curve_aa;
 		const { unit, error } = await this.alice.sendMulti({
 			asset: this.asset1,
-			base_outputs: [{ address: this.transferAddress, amount: 1e4 }],
-			asset_outputs: [{ address: this.transferAddress, amount: 59239545 }],
+			base_outputs: [{ address: this.currentTransfer, amount: 1e4 }],
+			asset_outputs: [{ address: this.currentTransfer, amount: this.amount1 }],
 			spend_unconfirmed: 'all',
 			messages: [{
 				app: 'data',
@@ -298,21 +341,18 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 				}
 			}]
 		});
-		
+
 		expect(error).to.be.null
 		expect(unit).to.be.validUnit
 
 		const { response: response } = await this.network.getAaResponseToUnit(unit);
 
-		expect(response.updatedStateVars[this.transferAddress][id].value.amount1).to.be.equal(amount1);
-
-		
+		expect(response.updatedStateVars[this.currentTransfer][id].value.amount1).to.be.equal(this.amount1);
 	});
-
 
 	it("Alice withdraw tokens1", async () => {
 		const { unit: newUnit, error } = await this.alice.triggerAaWithData({
-			toAddress: this.transferAddress,
+			toAddress: this.currentTransfer,
 			amount: 1e4,
 			data: {
 				curve_address: this.curve_aa,
@@ -321,19 +361,24 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 			},
 		});
 
+		this.amount1 = this.amount1 - 1500
+
 		expect(error).to.be.null
 		expect(newUnit).to.be.validUnit
 
 		const { response } = await this.network.getAaResponseToUnit(newUnit);
 
-		expect(response.updatedStateVars[this.transferAddress][this.aliceExchangeId].value.amount1).to.be.equal(59238045);
-
+		expect(response.updatedStateVars[this.currentTransfer][this.aliceExchangeId].value.amount1).to.be.equal(this.amount1);
 	});
 
 
 	it("Alice execute", async () => {
+		const oldAliceBalance = await this.alice.getBalance();
+		const { vars: transfer_vars } = await this.alice.readAAStateVars(this.currentTransfer);
+		const { vars: curve_vars } = await this.alice.readAAStateVars(this.curve_aa)
+
 		const { unit, error } = await this.alice.triggerAaWithData({
-			toAddress: this.transferAddress,
+			toAddress: this.currentTransfer,
 			amount: 1e4,
 			data: {
 				curve_address: this.curve_aa,
@@ -347,6 +392,9 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 
 		const { response } = await this.network.getAaResponseToUnit(unit);
 
+		this.count1FromTransfer = response.response.responseVars.count1;
+		this.count2FromTransfer = response.response.responseVars.count2;
+
 		expect(response.response.error).to.be.undefined
 		expect(response.bounced).to.be.false
 		expect(response.response_unit).to.be.validUnit
@@ -357,13 +405,61 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 		expect(nextResponse.response.error).to.be.undefined
 		expect(nextResponse.bounced).to.be.false
 		expect(nextResponse.response_unit).to.be.validUnit
-		
 		expect(nextResponse.response.responseVars['fee%']).to.be.equal("0%");
-	});
 
-	
+		const transfer_supply1 = transfer_vars["exchange_" + this.curve_aa].amount1;
+		const transfer_supply2 = transfer_vars["exchange_" + this.curve_aa].amount2;
+
+		const new_supply1 = curve_vars.supply1 - this.amount1;
+		const new_supply2 = curve_vars.supply2 - this.amount2;
+
+		const s1 = new_supply1 / 10 ** this.decimals1;
+		const s2 = new_supply2 / 10 ** this.decimals2;
+
+		const expectT1 = ((curve_vars.p2 / (curve_vars.dilution_factor * this.n * (isInteger(this.n * 2) ? Math.sqrt(s2 ** ((this.n - 1) * 2)) : s2 ** (this.n - 1)))) ** (1 / this.m)) - (curve_vars.supply1 / 10 ** this.decimals1);
+		const expectT2 = ((curve_vars.p2 / (curve_vars.dilution_factor * (s1 ** this.m) * this.n)) ** (1 / (this.n - 1))) - curve_vars.supply2 / 10 ** this.decimals2;
+
+		let count1, count2, change1, change2;
+
+		const expectT1WithoutDecimals = Math.abs(Math.round(expectT1 * 10 ** this.decimals1));
+		const expectT2WithoutDecimals = Math.abs(Math.round(expectT2 * 10 ** this.decimals2));
+
+		expect(transfer_supply1).to.be.equal(this.amount1);
+		expect(transfer_supply2).to.be.equal(this.amount2);
+		
+		if (expectT2WithoutDecimals < this.amount2) {
+			count1 = this.amount1;
+			count2 = expectT2WithoutDecimals;
+
+			change1 = 0;
+			change2 = this.amount2 - expectT2WithoutDecimals;
+		} else if (expectT1WithoutDecimals < this.amount1) {
+			count1 = expectT1WithoutDecimals;
+			count2 = this.amount2;
+
+			change1 = this.amount1 - expectT1WithoutDecimals;
+			change2 = 0;
+		} else {
+			count1 = 0;
+			count2 = 0;
+
+			change1 = 0;
+			change2 = 0;
+		}
+
+		expect(this.count1FromTransfer).to.be.equal(count1);
+		expect(this.count2FromTransfer).to.be.equal(count2);
+
+		const { fee, payout } = this.buy(-count1, -count2, false, curve_vars.p2); // TODO:  ERROR - payout and fee equal NaN
+
+		const newAliceBalance = await this.alice.getBalance();
+
+		const different = oldAliceBalance.base.stable + payout - 1e4 - newAliceBalance.base.stable;
+
+		expect(oldAliceBalance.base.stable + payout - 1e4).to.be.equal(newAliceBalance.base.stable);
+	});
 
 	after(async () => {
 		await this.network.stop();
 	})
-})
+});
