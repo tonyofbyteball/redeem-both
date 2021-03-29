@@ -1,7 +1,7 @@
 {
   bounce_fees: { base: 10000 },
   init: `{
-    $transfer_base_aa = "6NYNGKIWBVJ2BTVCMPMU3TZVCVE4FMG2";
+    $transfer_base_aa = "SAQ7L42RXEXYZ2VLMBELGSWWKYSZEHPI";
   }`,
   messages: {
     cases: [
@@ -25,21 +25,6 @@
 						app: 'definition',
 						payload: {
 							definition: `{$transfer_aa}`
-						}
-					},
-          {
-						app: 'payment',
-						payload: {
-							asset: 'base',
-							outputs: [
-								{ address: "{ $transfer_aa_address }", amount: 6000 }, // I'll get all this money back (minus fees)
-							]
-						}
-					},
-          {
-						app: 'data',
-						payload: {
-							define: 1
 						}
 					},
           {

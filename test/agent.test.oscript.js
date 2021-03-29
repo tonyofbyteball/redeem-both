@@ -100,7 +100,6 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 				feed_name1: 'GBYTE_USD',
 			},
 		})
-		// console.log(unit, error)
 
 		expect(error).to.be.null
 		expect(unit).to.be.validUnit
@@ -289,7 +288,6 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 
 
 	it('Alice create exchange and add tokens 2', async () => {
-		this.aliceExchangeId = "exchange_" + this.curve_aa;
 		this.amount2 = 4512;
 
 		const { unit, error } = await this.alice.sendMulti({
@@ -306,29 +304,67 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 		});
 
 		expect(error).to.be.null
-		expect(unit).to.be.validUnit
+		expect(unit).to.be.validUnitxw
+		
+		const { unitObj } = await this.alice.getUnitInfo({ unit })
 
-		const { response } = await this.network.getAaResponseToUnit(unit);
-		const id = "exchange_" + this.curve_aa;
-		const { vars: transfer_vars } = await this.alice.readAAStateVars(this.currentTransfer);
+		expect(Utils.getExternalPayments(unitObj)).to.deep.equalInAnyOrder([
+			{
+				address: this.currentTransfer,
+				amount: this.amount2,
+				asset: this.asset2
+			},
+			{
+				address: this.currentTransfer,
+				amount: 1e4
+			}
+		]);
+	});
 
-		expect(response.response.responseVars.id).to.be.equal(id);
-		expect(transfer_vars[id]).to.be.not.undefined;
+	it("Alice withdraw tokens1", async () => {
+		// const { unit, error } = await this.alice.triggerAaWithData({
+		// 	toAddress: this.currentTransfer,
+		// 	spend_unconfirmed: 'all',
+		// 	amount: 1e4,
+		// 	data: {
+		// 		curve_address: this.curve_aa,
+		// 		withdraw: 1,
+		// 		tokens1: 1500
+		// 	},
+		// });
 
-		expect(transfer_vars[id]).to.deep.equal({
-			id,
-			curve_address: this.curve_aa,
-			amount1: 0,
-			amount2: this.amount2,
-			max_fee_percent: 1,
-			owner: this.aliceAddress,
-		});
+		// this.amount1 = this.amount1 - 1500
+
+		// expect(error).to.be.null
+		// expect(unit).to.be.validUnit
+
+		// const { response } = await this.network.getAaResponseToUnit(unit);
+
+		// console.log("response", response.response_unit)
+
+		// const { response: nextRes } = await this.network.getAaResponseToUnit(response.response_unit);
+
+		// console.log("response", nextRes)
+
+		// const { unitObj } = await this.alice.getUnitInfo({ unit })
+
+		// expect(Utils.getExternalPayments(unitObj)).to.deep.equalInAnyOrder([
+		// 	{
+		// 		address: this.aliceAddress,
+		// 		amount: 1500,
+		// 		asset: this.asset1
+		// 	}
+		// ]);
+
+		// expect(response.updatedStateVars[this.currentTransfer][this.aliceExchangeId].value.amount1).to.be.equal(this.amount1);
 	});
 
 
-	it("Alice add tokens 1 to transfer", async () => {
+	it("Alice execute", async () => {
+		const oldAliceBalance = await this.alice.getBalance();
+		const { vars: curve_vars } = await this.alice.readAAStateVars(this.curve_aa)
+
 		this.amount1 = 59239545;
-		const id = "exchange_" + this.curve_aa;
 		const { unit, error } = await this.alice.sendMulti({
 			asset: this.asset1,
 			base_outputs: [{ address: this.currentTransfer, amount: 1e4 }],
@@ -340,51 +376,6 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 					curve_address: this.curve_aa
 				}
 			}]
-		});
-
-		expect(error).to.be.null
-		expect(unit).to.be.validUnit
-
-		const { response: response } = await this.network.getAaResponseToUnit(unit);
-
-		expect(response.updatedStateVars[this.currentTransfer][id].value.amount1).to.be.equal(this.amount1);
-	});
-
-	it("Alice withdraw tokens1", async () => {
-		const { unit: newUnit, error } = await this.alice.triggerAaWithData({
-			toAddress: this.currentTransfer,
-			amount: 1e4,
-			data: {
-				curve_address: this.curve_aa,
-				withdraw: 1,
-				tokens1: 1500
-			},
-		});
-
-		this.amount1 = this.amount1 - 1500
-
-		expect(error).to.be.null
-		expect(newUnit).to.be.validUnit
-
-		const { response } = await this.network.getAaResponseToUnit(newUnit);
-
-		expect(response.updatedStateVars[this.currentTransfer][this.aliceExchangeId].value.amount1).to.be.equal(this.amount1);
-	});
-
-
-	it("Alice execute", async () => {
-		const oldAliceBalance = await this.alice.getBalance();
-		const { vars: transfer_vars } = await this.alice.readAAStateVars(this.currentTransfer);
-		const { vars: curve_vars } = await this.alice.readAAStateVars(this.curve_aa)
-
-		const { unit, error } = await this.alice.triggerAaWithData({
-			toAddress: this.currentTransfer,
-			amount: 1e4,
-			data: {
-				curve_address: this.curve_aa,
-				// auto_withdraw: 1,
-				execute: 1
-			},
 		});
 
 		expect(error).to.be.null
@@ -407,8 +398,6 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 		expect(nextResponse.response_unit).to.be.validUnit
 		expect(nextResponse.response.responseVars['fee%']).to.be.equal("0%");
 
-		const transfer_supply1 = transfer_vars["exchange_" + this.curve_aa].amount1;
-		const transfer_supply2 = transfer_vars["exchange_" + this.curve_aa].amount2;
 
 		const new_supply1 = curve_vars.supply1 - this.amount1;
 		const new_supply2 = curve_vars.supply2 - this.amount2;
@@ -423,9 +412,6 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 
 		const expectT1WithoutDecimals = Math.abs(Math.round(expectT1 * 10 ** this.decimals1));
 		const expectT2WithoutDecimals = Math.abs(Math.round(expectT2 * 10 ** this.decimals2));
-
-		expect(transfer_supply1).to.be.equal(this.amount1);
-		expect(transfer_supply2).to.be.equal(this.amount2);
 		
 		if (expectT2WithoutDecimals < this.amount2) {
 			count1 = this.amount1;
@@ -450,7 +436,8 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 		expect(this.count1FromTransfer).to.be.equal(count1);
 		expect(this.count2FromTransfer).to.be.equal(count2);
 
-		const { fee, payout } = this.buy(-count1, -count2, false, curve_vars.p2); // TODO:  ERROR - payout and fee equal NaN
+
+		const { fee, payout } = this.buy(-count1, -count2, false, curve_vars.p2);
 
 		const newAliceBalance = await this.alice.getBalance();
 
