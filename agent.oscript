@@ -3,6 +3,19 @@
 		$owner = params.owner;
 		if(!$owner)
 			bounce('no owner');
+		
+		if($owner != trigger.address)
+			bounce('You are not the owner');
+
+		$curve_address = trigger.data.curve_address;
+		if (!exists($curve_address) OR !is_valid_address($curve_address))
+			bounce('bad curve_address');
+		
+		$asset1 = var[$curve_address]['asset1'];
+		$asset2 = var[$curve_address]['asset2'];
+		
+		if (!$asset1 OR !$asset2)
+			bounce('curve not found');
 	}`,
 	messages: {
 		cases: [
@@ -11,20 +24,6 @@
 				init: `{
 					$tokens1 = trigger.data.tokens1 OTHERWISE 0;
 					$tokens2 = trigger.data.tokens2 OTHERWISE 0;
-
-					if($owner != trigger.address)
-						bounce('You not owner');
-
-					$curve_address = trigger.data.curve_address;
-
-					if (!exists($curve_address) OR !is_valid_address($curve_address))
-						bounce('bad curve_address address');
-					
-					$asset1 = var[$curve_address]['asset1'];
-					$asset2 = var[$curve_address]['asset2'];
-					
-					if (!$asset1 AND !$asset2)
-						bounce('curve not found');
 
 					$balance1 = balance[$asset1];
 					$balance2 = balance[$asset2];
@@ -63,21 +62,7 @@
 				]
 			},
 			{
-				if: "{ trigger.data.curve_address}",
 				init: `{
-					$curve_address = trigger.data.curve_address;
-
-					if($owner != trigger.address)
-						bounce('You not owner');
-						
-					if (!exists($curve_address) OR !is_valid_address($curve_address))
-						bounce('bad curve_address address');
-					
-					$asset1 = var[$curve_address]['asset1'];
-					$asset2 = var[$curve_address]['asset2'];
-
-					if (!$asset1 AND !$asset2)
-						bounce('curve not found');
 
 					if(!exists(var[$curve_address]['p2']))
 						bounce('p2 not initialized');
