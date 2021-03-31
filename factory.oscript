@@ -1,40 +1,40 @@
 {
-  init: `{
-    $carburetor_base_aa = "DAZR4ITINFN3WH4OCQFVKQ4PYZJDVVOA";
-  }`,
-  messages: {
-    cases: [
-      {
-        if: "{ trigger.data.create }",
-        init: `{
-          $carburetor_aa = [
-            'autonomous agent',
-            {
-              base_aa: $carburetor_base_aa,
-              params: {
-                owner: trigger.address
-              }
-            }
-          ];
+	init: `{
+		$carburetor_base_aa = "DAZR4ITINFN3WH4OCQFVKQ4PYZJDVVOA";
+	}`,
+	messages: {
+		cases: [
+			{
+				if: "{ trigger.data.create }",
+				init: `{
+					$carburetor_aa = [
+						'autonomous agent',
+						{
+							base_aa: $carburetor_base_aa,
+							params: {
+								owner: trigger.address
+							}
+						}
+					];
 
-          $carburetor_aa_address = chash160($carburetor_aa);
-        }`,
-        messages: [
-          {
+					$carburetor_aa_address = chash160($carburetor_aa);
+				}`,
+				messages: [
+					{
 						app: 'definition',
 						payload: {
 							definition: `{$carburetor_aa}`
 						}
 					},
-          {
-            app: "state",
-            state: `{
-              var["carburetor_" || trigger.address] = $carburetor_aa_address;
-              response['carburetor'] = $carburetor_aa_address;
-            }`
-          },
-        ]
-      }
-    ]
-  }
+					{
+						app: "state",
+						state: `{
+							var["carburetor_" || trigger.address] = $carburetor_aa_address;
+							response['carburetor'] = $carburetor_aa_address;
+						}`
+					},
+				]
+			}
+		]
+	}
 }
