@@ -440,7 +440,7 @@ describe('Redeem T1 and T1 by first depositing them on a "carburetor" AA, then s
 		const { fee, payout } = this.buy(-count1, -count2);
 
 		const { unitObj } = await this.alice.getUnitInfo({ unit: response.response_unit })
-		const expectedChange = change1
+		this.expectedChange = change1
 			? {
 				asset: this.asset1,
 				address: this.aliceAddress,
@@ -462,7 +462,7 @@ describe('Redeem T1 and T1 by first depositing them on a "carburetor" AA, then s
 				address: this.curve_aa,
 				amount: count1,
 			},
-		//	expectedChange,
+		//	this.expectedChange,
 		]);
 
 		const { unitObj: unitObj2 } = await this.alice.getUnitInfo({ unit: nextResponse.response_unit })
@@ -475,6 +475,32 @@ describe('Redeem T1 and T1 by first depositing them on a "carburetor" AA, then s
 
 		const newAliceBalance = await this.alice.getOutputsBalanceOf(this.aliceAddress);
 		expect(oldAliceBalance.base.total + payout - 1e4 - requestUnitObj.headers_commission - requestUnitObj.payload_commission).to.be.equal(newAliceBalance.base.total);
+	});
+
+
+	it("Alice withdraws the remaining tokens", async () => {
+		const { unit, error } = await this.alice.triggerAaWithData({
+			toAddress: this.currentCarburetor,
+			spend_unconfirmed: 'all',
+			amount: 1e4,
+			data: {
+				curve_address: this.curve_aa,
+				withdraw: 1,
+			},
+		});
+
+		expect(error).to.be.null
+		expect(unit).to.be.validUnit
+
+		const { response } = await this.network.getAaResponseToUnit(unit);
+		expect(response.response.error).to.be.undefined
+		expect(response.bounced).to.be.false
+		expect(response.response_unit).to.be.validUnit
+
+		const { unitObj } = await this.alice.getUnitInfo({ unit: response.response_unit })
+		expect(Utils.getExternalPayments(unitObj)).to.deep.equalInAnyOrder([
+			this.expectedChange
+		]);
 	});
 
 	after(async () => {
