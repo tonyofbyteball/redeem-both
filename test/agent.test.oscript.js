@@ -9,7 +9,7 @@ function round(n, precision) {
 	return Math.round(n * 10 ** precision) / 10 ** precision;
 }
 
-describe('Buy T2 through a buffer AA using several partial executions', function () {
+describe('Redeem T1 and T1 by first depositing them on a "carburetor" AA, then sending both for redemption in the right proportion', function () {
 	this.timeout(120000)
 
 
@@ -212,7 +212,7 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 		this.distance = 0
 	})
 
-	it('Alice create carburetor', async () => {
+	it('Alice creates a new carburetor', async () => {
 		const { unit, error } = await this.alice.triggerAaWithData({
 			toAddress: this.factoryAddress,
 			amount: 1e4,
@@ -286,7 +286,7 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 	})
 
 
-	it('Alice create exchange and add tokens 2', async () => {
+	it('Alice deposits tokens2 to the carb', async () => {
 		this.amount2 = 4512;
 
 		const { unit, error } = await this.alice.sendMulti({
@@ -359,7 +359,7 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 	});
 
 
-	it("Alice execute", async () => {
+	it("Alice deposits tokens1 which triggers redemption", async () => {
 		const oldAliceBalance = await this.alice.getOutputsBalanceOf(this.aliceAddress);
 		const { vars: curve_vars } = await this.alice.readAAStateVars(this.curve_aa)
 
