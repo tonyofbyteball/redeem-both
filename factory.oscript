@@ -1,7 +1,6 @@
 {
-  bounce_fees: { base: 10000 },
   init: `{
-    $carburetor_base_aa = "SAQ7L42RXEXYZ2VLMBELGSWWKYSZEHPI";
+    $carburetor_base_aa = "K7S56E4HVBGFSVOK263UYKBQTDGRODUU";
   }`,
   messages: {
     cases: [

@@ -384,13 +384,12 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 
 		const { response } = await this.network.getAaResponseToUnit(unit);
 
-		this.count1FromCarburetor = response.response.responseVars.count1;
-		this.count2FromCarburetor = response.response.responseVars.count2;
-
 		expect(response.response.error).to.be.undefined
 		expect(response.bounced).to.be.false
 		expect(response.response_unit).to.be.validUnit
-		expect(response.response.responseVars.fee_percent).to.be.lessThan(1);
+
+		this.count1FromCarburetor = response.response.responseVars.count1;
+		this.count2FromCarburetor = response.response.responseVars.count2;
 
 		const { response: nextResponse } = await this.network.getAaResponseToUnit(response.objResponseUnit.unit);
 
