@@ -23,7 +23,7 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 			.with.agent({ governance: path.join(__dirname, '../node_modules/bonded-stablecoin/governance.oscript') })
 			.with.agent({ deposits: path.join(__dirname, '../node_modules/bonded-stablecoin/deposits.oscript') })
 			.with.agent({ factory: path.join(__dirname, '../factory.oscript') })
-			.with.agent({ transfer: path.join(__dirname, '../agent.oscript') })
+			.with.agent({ carburetor: path.join(__dirname, '../agent.oscript') })
 			.with.wallet({ oracle: 1e6 })
 			.with.wallet({ alice: 100000e9 })
 			.with.wallet({ bob: 1000e9 })
@@ -38,16 +38,16 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 		this.bob = this.network.wallet.bob
 		this.bobAddress = await this.bob.getAddress()
 
-		this.transferAddress = this.network.agent.transfer
+		this.carburetorAddress = this.network.agent.carburetor
 		this.factoryAddress = this.network.agent.factory
 
-		// this.curveAddress = this.network.agent.transfer
+		// this.curveAddress = this.network.agent.carburetor
 		this.n = 0.5;
 		this.m = 2;
 		this.decimals1 = 9;
 		this.decimals2 = 2;
 
-		console.log("transferAddress", this.transferAddress)
+		console.log("carburetorAddress", this.carburetorAddress)
 		//	this.explorer = await this.network.newObyteExplorer().ready()
 
 		const balance = await this.bob.getBalance()
@@ -212,7 +212,7 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 		this.distance = 0
 	})
 
-	it('Alice create transfer', async () => {
+	it('Alice create carburetor', async () => {
 		const { unit, error } = await this.alice.triggerAaWithData({
 			toAddress: this.factoryAddress,
 			amount: 1e4,
@@ -226,12 +226,12 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 
 		const { response } = await this.network.getAaResponseToUnit(unit)
 
-		expect(response.response.responseVars.transfer).to.be.not.undefined
+		expect(response.response.responseVars.carburetor).to.be.not.undefined
 		expect(response.response.error).to.be.undefined
 		expect(response.bounced).to.be.false
 		expect(response.response_unit).to.be.validUnit
 
-		this.currentTransfer = response.response.responseVars.transfer;
+		this.currentCarburetor = response.response.responseVars.carburetor;
 	})
 
 	it('Alice buys tokens', async () => {
@@ -291,8 +291,8 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 
 		const { unit, error } = await this.alice.sendMulti({
 			asset: this.asset2,
-			base_outputs: [{ address: this.currentTransfer, amount: 1e4 }],
-			asset_outputs: [{ address: this.currentTransfer, amount: this.amount2 }],
+			base_outputs: [{ address: this.currentCarburetor, amount: 1e4 }],
+			asset_outputs: [{ address: this.currentCarburetor, amount: this.amount2 }],
 			spend_unconfirmed: 'all',
 			messages: [{
 				app: 'data',
@@ -309,12 +309,12 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 
 		expect(Utils.getExternalPayments(unitObj)).to.deep.equalInAnyOrder([
 			{
-				address: this.currentTransfer,
+				address: this.currentCarburetor,
 				amount: this.amount2,
 				asset: this.asset2
 			},
 			{
-				address: this.currentTransfer,
+				address: this.currentCarburetor,
 				amount: 1e4
 			}
 		]);
@@ -322,7 +322,7 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 
 	it("Alice withdraw tokens1", async () => {
 		// const { unit, error } = await this.alice.triggerAaWithData({
-		// 	toAddress: this.currentTransfer,
+		// 	toAddress: this.currentCarburetor,
 		// 	spend_unconfirmed: 'all',
 		// 	amount: 1e4,
 		// 	data: {
@@ -355,7 +355,7 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 		// 	}
 		// ]);
 
-		// expect(response.updatedStateVars[this.currentTransfer][this.aliceExchangeId].value.amount1).to.be.equal(this.amount1);
+		// expect(response.updatedStateVars[this.currentCarburetor][this.aliceExchangeId].value.amount1).to.be.equal(this.amount1);
 	});
 
 
@@ -366,8 +366,8 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 		this.amount1 = 59239545;
 		const { unit, error } = await this.alice.sendMulti({
 			asset: this.asset1,
-			base_outputs: [{ address: this.currentTransfer, amount: 1e4 }],
-			asset_outputs: [{ address: this.currentTransfer, amount: this.amount1 }],
+			base_outputs: [{ address: this.currentCarburetor, amount: 1e4 }],
+			asset_outputs: [{ address: this.currentCarburetor, amount: this.amount1 }],
 			spend_unconfirmed: 'all',
 			messages: [{
 				app: 'data',
@@ -384,8 +384,8 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 
 		const { response } = await this.network.getAaResponseToUnit(unit);
 
-		this.count1FromTransfer = response.response.responseVars.count1;
-		this.count2FromTransfer = response.response.responseVars.count2;
+		this.count1FromCarburetor = response.response.responseVars.count1;
+		this.count2FromCarburetor = response.response.responseVars.count2;
 
 		expect(response.response.error).to.be.undefined
 		expect(response.bounced).to.be.false
@@ -434,8 +434,8 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 			change2 = 0;
 		}
 
-		expect(this.count1FromTransfer).to.be.equal(count1);
-		expect(this.count2FromTransfer).to.be.equal(count2);
+		expect(this.count1FromCarburetor).to.be.equal(count1);
+		expect(this.count2FromCarburetor).to.be.equal(count2);
 
 
 		const { fee, payout } = this.buy(-count1, -count2);
