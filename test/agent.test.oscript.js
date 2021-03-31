@@ -140,14 +140,14 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 		this.getReserve = (s1, s2) => Math.ceil(1e9 * (s1 / 1e9) ** 2 * (s2 / 1e2) ** 0.5)
 		this.getP2 = (s1, s2) => (s1 / 1e9) ** 2 * 0.5 / (s2 / 1e2) ** 0.5
 		this.getFee = (avg_reserve, old_distance, new_distance) => Math.ceil(avg_reserve * (new_distance ** 2 - old_distance ** 2) * this.fee_multiplier);
-		this.buy = (tokens1, tokens2, bNoUpdate, new_p2) => {
+		this.buy = (tokens1, tokens2, bNoUpdate) => {
 			const new_supply1 = this.supply1 + tokens1
 			const new_supply2 = this.supply2 + tokens2
 			const new_reserve = this.getReserve(new_supply1, new_supply2)
 			const amount = new_reserve - this.reserve
 			const abs_reserve_delta = Math.abs(amount)
 			const avg_reserve = (this.reserve + new_reserve) / 2
-			const p2 = new_p2 || this.getP2(new_supply1, new_supply2)
+			const p2 = this.getP2(new_supply1, new_supply2)
 
 			const old_distance = this.reserve ? Math.abs(this.p2 - this.target_p2) / this.target_p2 : 0
 			const new_distance = Math.abs(p2 - this.target_p2) / this.target_p2
@@ -177,8 +177,7 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 			// const reward = old_distance ? Math.floor((1 - new_distance / old_distance) * this.fast_capacity) : 0;
 			const reward_percent = round(reward / abs_reserve_delta * 100, 4)
 
-			const reserve_asset_amount = 1e4 - 1e3;
-			const payout = reserve_asset_amount - reserve_needed;
+			const payout = - reserve_needed - 1000;
 
 			// console.log('p2 =', p2, 'target p2 =', this.target_p2, 'amount =', amount, 'fee =', fee, 'reward =', reward, 'old distance =', old_distance, 'new distance =', new_distance, 'fast capacity =', this.fast_capacity)
 
@@ -304,7 +303,7 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 		});
 
 		expect(error).to.be.null
-		expect(unit).to.be.validUnitxw
+		expect(unit).to.be.validUnit
 		
 		const { unitObj } = await this.alice.getUnitInfo({ unit })
 
@@ -361,7 +360,7 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 
 
 	it("Alice execute", async () => {
-		const oldAliceBalance = await this.alice.getBalance();
+		const oldAliceBalance = await this.alice.getOutputsBalanceOf(this.aliceAddress);
 		const { vars: curve_vars } = await this.alice.readAAStateVars(this.curve_aa)
 
 		this.amount1 = 59239545;
@@ -373,6 +372,7 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 			messages: [{
 				app: 'data',
 				payload: {
+				//	auto_withdraw: 1,
 					curve_address: this.curve_aa
 				}
 			}]
@@ -380,6 +380,7 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 
 		expect(error).to.be.null
 		expect(unit).to.be.validUnit
+		const { unitObj: requestUnitObj } = await this.alice.getUnitInfo({ unit })
 
 		const { response } = await this.network.getAaResponseToUnit(unit);
 
@@ -437,13 +438,44 @@ describe('Buy T2 through a buffer AA using several partial executions', function
 		expect(this.count2FromTransfer).to.be.equal(count2);
 
 
-		const { fee, payout } = this.buy(-count1, -count2, false, curve_vars.p2);
+		const { fee, payout } = this.buy(-count1, -count2);
 
-		const newAliceBalance = await this.alice.getBalance();
+		const { unitObj } = await this.alice.getUnitInfo({ unit: response.response_unit })
+		const expectedChange = change1
+			? {
+				asset: this.asset1,
+				address: this.aliceAddress,
+				amount: change1,
+			}
+			: {
+				asset: this.asset2,
+				address: this.aliceAddress,
+				amount: change2,
+			}
+		expect(Utils.getExternalPayments(unitObj)).to.deep.equalInAnyOrder([
+			{
+				asset: this.asset2,
+				address: this.curve_aa,
+				amount: count2,
+			},
+			{
+				asset: this.asset1,
+				address: this.curve_aa,
+				amount: count1,
+			},
+		//	expectedChange,
+		]);
 
-		const different = oldAliceBalance.base.stable + payout - 1e4 - newAliceBalance.base.stable;
+		const { unitObj: unitObj2 } = await this.alice.getUnitInfo({ unit: nextResponse.response_unit })
+		expect(Utils.getExternalPayments(unitObj2)).to.deep.equalInAnyOrder([
+			{
+				address: this.aliceAddress,
+				amount: payout,
+			},
+		]);
 
-		expect(oldAliceBalance.base.stable + payout - 1e4).to.be.equal(newAliceBalance.base.stable);
+		const newAliceBalance = await this.alice.getOutputsBalanceOf(this.aliceAddress);
+		expect(oldAliceBalance.base.total + payout - 1e4 - requestUnitObj.headers_commission - requestUnitObj.payload_commission).to.be.equal(newAliceBalance.base.total);
 	});
 
 	after(async () => {
