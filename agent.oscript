@@ -69,10 +69,18 @@
 				
 					$canBeDone = balance[$asset1] > 0 AND balance[$asset2] > 0;
 
+					$curve_params = definition[$curve_address][1].params;
+
+					if(trigger.output[[asset=$asset1]] > 0){
+						response['message'] = "Added " || (trigger.output[[asset=$asset1]] / 10^$curve_params.decimals1) || " T1 tokens";
+					}
+					
+					if (trigger.output[[asset=$asset2]] > 0){
+						response['message'] = "Added " || (trigger.output[[asset=$asset2]] / 10^$curve_params.decimals2) || " T2 tokens";
+					}
+
 					if($canBeDone){
 						$initial_p2 = var[$curve_address]['p2'];
-						
-						$curve_params = definition[$curve_address][1].params;
 
 						$dilution_factor = var[$curve_address]['dilution_factor'];
 

@@ -1,6 +1,6 @@
 {
 	init: `{
-		$carburetor_base_aa = "DAZR4ITINFN3WH4OCQFVKQ4PYZJDVVOA";
+		$carburetor_base_aa = "CUIR3XUBUBX7ORQ7NP23M3GCNQQC46ID";
 	}`,
 	messages: {
 		cases: [
