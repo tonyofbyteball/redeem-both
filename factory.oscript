@@ -1,41 +1,40 @@
 {
-  bounce_fees: { base: 10000 },
-  init: `{
-    $transfer_base_aa = "SAQ7L42RXEXYZ2VLMBELGSWWKYSZEHPI";
-  }`,
-  messages: {
-    cases: [
-      {
-        if: "{ trigger.data.create }",
-        init: `{
-          $transfer_aa = [
-            'autonomous agent',
-            {
-              base_aa: $transfer_base_aa,
-              params: {
-                owner: trigger.address
-              }
-            }
-          ];
+	init: `{
+		$carburetor_base_aa = "CUIR3XUBUBX7ORQ7NP23M3GCNQQC46ID";
+	}`,
+	messages: {
+		cases: [
+			{
+				if: "{ trigger.data.create }",
+				init: `{
+					$carburetor_aa = [
+						'autonomous agent',
+						{
+							base_aa: $carburetor_base_aa,
+							params: {
+								owner: trigger.address
+							}
+						}
+					];
 
-          $transfer_aa_address = chash160($transfer_aa);
-        }`,
-        messages: [
-          {
+					$carburetor_aa_address = chash160($carburetor_aa);
+				}`,
+				messages: [
+					{
 						app: 'definition',
 						payload: {
-							definition: `{$transfer_aa}`
+							definition: `{$carburetor_aa}`
 						}
 					},
-          {
-            app: "state",
-            state: `{
-              var["transfer_" || trigger.address] = $transfer_aa_address;
-              response['transfer'] = $transfer_aa_address;
-            }`
-          },
-        ]
-      }
-    ]
-  }
+					{
+						app: "state",
+						state: `{
+							var["carburetor_" || trigger.address] = $carburetor_aa_address;
+							response['carburetor'] = $carburetor_aa_address;
+						}`
+					},
+				]
+			}
+		]
+	}
 }
